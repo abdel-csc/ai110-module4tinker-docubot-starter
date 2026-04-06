@@ -7,8 +7,10 @@ Core DocuBot class responsible for:
 - Supporting RAG answers when paired with Gemini (Phase 2)
 """
 
+from operator import index
 import os
 import glob
+
 
 class DocuBot:
     def __init__(self, docs_folder="docs", llm_client=None):
@@ -65,6 +67,13 @@ class DocuBot:
         """
         index = {}
         # TODO: implement simple indexing
+        for filename, text in documents:
+            words = text.lower().split()
+            for word in words:
+                if word not in index:
+                    index[word] = []
+                if filename not in index[word]:
+                    index[word].append(filename)
         return index
 
     # -----------------------------------------------------------
@@ -82,7 +91,13 @@ class DocuBot:
         - Return the count as the score
         """
         # TODO: implement scoring
-        return 0
+        import string
+        query_words = query.lower().split()
+        text_lower = text.lower()
+        for char in string.punctuation:
+            text_lower = text_lower.replace(char, " ")
+        score = sum(1 for word in query_words if word in text_lower.split())
+        return score
 
     def retrieve(self, query, top_k=3):
         """
@@ -93,7 +108,12 @@ class DocuBot:
         """
         results = []
         # TODO: implement retrieval logic
-        return results[:top_k]
+        for filename, text in self.documents:
+            score = self.score_document(query, text)
+            if score > 0:
+                results.append((score, filename, text))
+        results.sort(reverse=True)
+        return [(filename, text) for score, filename, text in results[:top_k]]
 
     # -----------------------------------------------------------
     # Answering Modes

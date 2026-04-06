@@ -7,12 +7,11 @@ Supports three modes:
 3. RAG: retrieval plus LLM generation (Phase 2)
 """
 
+from dataset import SAMPLE_QUERIES
+from llm_client import GeminiClient
+from docubot import DocuBot
 from dotenv import load_dotenv
 load_dotenv()
-
-from docubot import DocuBot
-from llm_client import GeminiClient
-from dataset import SAMPLE_QUERIES
 
 
 def try_create_llm_client():
