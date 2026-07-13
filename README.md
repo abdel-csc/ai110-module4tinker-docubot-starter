@@ -90,5 +90,5 @@ You will primarily work in:
 
  To guide a struggling student without giving the answer, I would ask: "If you had to search these files yourself with ctrl+f, what word would you type?". Questions like these probe the mind of an individual to really think about their next steps.
 
- We often hold AI as a 'being' that's smarter than most, but honestly, it's only as smart as *you* make it. This project really shows us behind-the-scenes across these powerful words of 'AI' and 'LLMs'.
+ We often hold AI as a 'being' that's smarter than most, but honestly, it's only as smart as *you* make it. This project really shows us behind-the-scenes across these powerful words of 'AI' and 'LLMs'. It's a *collaborative* tool.
 
