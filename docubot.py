@@ -7,9 +7,28 @@ Core DocuBot class responsible for:
 - Supporting RAG answers when paired with Gemini (Phase 2)
 """
 
-from operator import index
 import os
 import glob
+import string
+
+# Common filler words that match almost every doc and inflate scores.
+STOPWORDS = {
+    "a", "an", "and", "are", "any", "do", "does", "for", "how", "i",
+    "in", "is", "it", "of", "on", "or", "the", "there", "these", "this",
+    "to", "what", "where", "which", "who", "why", "with",
+}
+
+# Guardrail: a snippet must match at least this many meaningful query
+# words, otherwise DocuBot refuses instead of guessing.
+MIN_SCORE = 2
+
+
+def tokenize(text):
+    """Lowercase, turn punctuation into spaces, and split into words."""
+    text = text.lower()
+    for char in string.punctuation:
+        text = text.replace(char, " ")
+    return text.split()
 
 
 class DocuBot:
@@ -24,12 +43,11 @@ class DocuBot:
         # Load documents into memory
         self.documents = self.load_documents()  # List of (filename, text)
 
+        # Split documents into heading-based sections (Part 3)
+        self.chunks = self.chunk_documents(self.documents)  # List of (filename, section)
+
         # Build a retrieval index (implemented in Phase 1)
         self.index = self.build_index(self.documents)
-
-    # -----------------------------------------------------------
-    # Document Loading
-    # -----------------------------------------------------------
 
     def load_documents(self):
         """
@@ -46,78 +64,79 @@ class DocuBot:
                 docs.append((filename, text))
         return docs
 
-    # -----------------------------------------------------------
-    # Index Construction (Phase 1)
-    # -----------------------------------------------------------
+    def chunk_documents(self, documents):
+        """
+        Split each document into sections, starting a new chunk at every
+        markdown heading (a line starting with "#"). Each chunk keeps its
+        heading, so retrieval returns a focused, labeled snippet instead of
+        a whole file. Returns a list of (filename, section_text).
+        """
+        chunks = []
+        for filename, text in documents:
+            current = []
+            for line in text.splitlines():
+                if line.startswith("#") and current:
+                    chunks.append((filename, "\n".join(current).strip()))
+                    current = []
+                current.append(line)
+            if current:
+                chunks.append((filename, "\n".join(current).strip()))
+        return [(f, c) for f, c in chunks if c]
 
     def build_index(self, documents):
         """
-        TODO (Phase 1):
         Build a tiny inverted index mapping lowercase words to the documents
         they appear in.
-
-        Example structure:
-        {
-            "token": ["AUTH.md", "API_REFERENCE.md"],
-            "database": ["DATABASE.md"]
-        }
-
-        Keep this simple: split on whitespace, lowercase tokens,
-        ignore punctuation if needed.
         """
         index = {}
-        # TODO: implement simple indexing
         for filename, text in documents:
-            words = text.lower().split()
-            for word in words:
+            for word in tokenize(text):
                 if word not in index:
                     index[word] = []
                 if filename not in index[word]:
                     index[word].append(filename)
         return index
 
-    # -----------------------------------------------------------
-    # Scoring and Retrieval (Phase 1)
-    # -----------------------------------------------------------
-
     def score_document(self, query, text):
         """
-        TODO (Phase 1):
-        Return a simple relevance score for how well the text matches the query.
-
-        Suggested baseline:
-        - Convert query into lowercase words
-        - Count how many appear in the text
-        - Return the count as the score
+        Return a relevance score: how many meaningful (non-filler)
+        query words appear in the text.
         """
-        # TODO: implement scoring
-        import string
-        query_words = query.lower().split()
-        text_lower = text.lower()
-        for char in string.punctuation:
-            text_lower = text_lower.replace(char, " ")
-        score = sum(1 for word in query_words if word in text_lower.split())
+        query_words = {w for w in tokenize(query) if w not in STOPWORDS}
+        text_words = set(tokenize(text))
+        score = 0
+        for word in query_words:
+            # Exact match, or a simple prefix match so "connect" also
+            # matches "connection" (only for words of 4+ letters)
+            if word in text_words or (
+                len(word) >= 4 and any(t.startswith(word) for t in text_words)
+            ):
+                score += 1
         return score
 
     def retrieve(self, query, top_k=3):
         """
-        TODO (Phase 1):
-        Use the index and scoring function to select top_k relevant document snippets.
-
+        Use the index and scoring function to select top_k relevant sections.
         Return a list of (filename, text) sorted by score descending.
         """
-        results = []
-        # TODO: implement retrieval logic
-        for filename, text in self.documents:
-            score = self.score_document(query, text)
-            if score > 0:
-                results.append((score, filename, text))
-        results.sort(reverse=True)
-        return [(filename, text) for score, filename, text in results[:top_k]]
+        # Use the index to find which files contain any meaningful query word
+        candidate_files = set()
+        for word in tokenize(query):
+            if word not in STOPWORDS:
+                candidate_files.update(self.index.get(word, []))
 
-    # -----------------------------------------------------------
-    # Answering Modes
-    # -----------------------------------------------------------
+        # Score each section in those files
+        results = []
+        for filename, chunk in self.chunks:
+            if filename not in candidate_files:
+                continue
+            score = self.score_document(query, chunk)
+            if score >= MIN_SCORE:  # guardrail: skip weak matches
+                results.append((score, filename, chunk))
+
+        # Highest score first; ties broken alphabetically by filename
+        results.sort(key=lambda r: (-r[0], r[1]))
+        return [(filename, chunk) for score, filename, chunk in results[:top_k]]
 
     def answer_retrieval_only(self, query, top_k=3):
         """
@@ -152,10 +171,6 @@ class DocuBot:
             return "I do not know based on these docs."
 
         return self.llm_client.answer_from_snippets(query, snippets)
-
-    # -----------------------------------------------------------
-    # Bonus Helper: concatenated docs for naive generation mode
-    # -----------------------------------------------------------
 
     def full_corpus_text(self):
         """
